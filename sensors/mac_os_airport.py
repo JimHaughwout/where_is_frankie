@@ -1,14 +1,13 @@
 from subprocess import check_output
-import requests
-import json
+from time import time
 
-def scan_wifis():
+def _scan_wifis():
     CMD = "/System/Library/PrivateFrameworks/Apple80211.framework/Versions/Current/Resources/airport"
     OPT = "-s"
     results = check_output([CMD, OPT]).split('\n')
     return results
 
-def parse_wifi_scan_results(results):
+def _parse_scan_results(results):
     # Find delimiters
     bssid_start = results[0].find('BSSID')
     rssi_start = results[0].find('RSSI')
@@ -27,20 +26,37 @@ def parse_wifi_scan_results(results):
     return sorted(parsed_results, key=lambda x: x['signalStrength'], reverse=True)
 
 
-def get_location(parsed_results):
-    API_KEY = 'AIzaSyDcv-DsSncE_0J70_bf8DAXBfT887fsWXs'
-    url = 'https://www.googleapis.com/geolocation/v1/geolocate?key=%s' % API_KEY
-    payload = {'wifiAccessPoints' : parsed_results}
-    r = requests.post(url, json=payload)
-    if r.status_code == 200:
-        return json.loads(r.text)
-    else:
-        print "Received Response Code %d" % r.status_code
+def _get_mac_addr():
+    CMD = "/sbin/ifconfig"
+    raw = check_output([CMD])
+    results = raw.replace('\t', '').split('\n')
+    ether = None
+    status = None
+    for item in results:
+        if not ether:
+            if item[:2] == 'en':
+                ether = item[:3]
+        if ether and item[:6] == 'status':
+            if item.split(' ')[-1] == 'active':
+                status = 'active'
+            else:
+                ether = None
+        if ether and status and item[:5] == 'ether':
+            return item.strip().split(' ')[-1].strip()
+    return "NotAvailable"
 
 
-print "Scanning Wifis..."
-raw_scan = scan_wifis()
-results = parse_wifi_scan_results(raw_scan)
-print json.dumps(results, indent=2)
-print "Getting location based on Wifis..."
-print get_location(results)
+def mac_os_location_scan():
+    unix_time = int(time())
+    mac_os_addr = _get_mac_addr()
+    raw_scan_results = _scan_wifis()
+    stations = _parse_scan_results(raw_scan_results)
+
+    payload = {}
+    payload['sensorId'] = mac_os_addr
+    payload['asOfTimestamp'] = unix_time
+    payload['wifiAccessPoints'] = stations
+    return payload
+
+
+
